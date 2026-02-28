@@ -1,18 +1,5 @@
 ## Testing
 
-### Unit Tests
-
-```bash
-# Run all tests
-pytest tests/ -v
-
-# Run specific test file
-pytest tests/test_auth.py -v
-
-# Run with coverage
-pytest tests/ --cov=litepolis_router_default
-```
-
 ### E2E Tests
 
 E2E tests verify full API functionality:

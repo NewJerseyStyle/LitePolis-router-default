@@ -281,6 +281,6 @@ See LICENSE file.
 
 ## Related Projects
 
-- [litepolis-database-default]([LitePolis-database-default](https://github.com/NewJerseyStyle/LitePolis-database-default)) - Database layer
+- [litepolis-database-default](https://github.com/NewJerseyStyle/LitePolis-database-default) - Database layer
 - [litepolis-middleware-default](https://github.com/NewJerseyStyle/LitePolis-middleware-default) - Authentication middleware
 - [Polis](https://github.com/compdemocracy/polis) - Original Polis system

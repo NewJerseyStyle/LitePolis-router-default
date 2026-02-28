@@ -1,0 +1,40 @@
+[build-system]
+requires = [
+    "setuptools>=61.2",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "litepolis-router-default"
+version = "0.0.1"
+authors = [
+    { name = "Your name" },
+]
+description = "The template module for LitePolis"
+dependencies = [
+    "fastapi",
+    "litepolis",
+    "pydantic>=2.0",
+    "python-jose[cryptography]>=3.3.0",
+    "passlib[bcrypt]>=1.7.4",
+    "litepolis-database-default",
+]
+
+[project.license]
+text = "file: LICENSE"
+
+[project.readme]
+file = "README.md"
+content-type = "text/markdown"
+
+[project.urls]
+Homepage = "https://github.com/change-to-your-repo"
+
+[tool.setuptools]
+include-package-data = false
+
+[tool.setuptools.packages.find]
+exclude = [
+    "tests",
+]
+namespaces = false

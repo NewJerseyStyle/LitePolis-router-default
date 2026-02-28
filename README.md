@@ -262,6 +262,21 @@ DEFAULT_CONFIG = {
 }
 ```
 
+## Testing
+
+### Unit Tests
+
+```bash
+# Run all tests
+pytest tests/ -v
+
+# Run specific test file
+pytest tests/test_auth.py -v
+
+# Run with coverage
+pytest tests/ --cov=litepolis_router_default
+```
+
 ## Known Limitations
 
 1. **Math endpoints** (`/math/pca`, `/math/pca2`) are stubs - return placeholder data
@@ -282,5 +297,4 @@ See LICENSE file.
 ## Related Projects
 
 - [litepolis-database-default](https://github.com/NewJerseyStyle/LitePolis-database-default) - Database layer
-- [litepolis-middleware-default](https://github.com/NewJerseyStyle/LitePolis-middleware-default) - Authentication middleware
 - [Polis](https://github.com/compdemocracy/polis) - Original Polis system

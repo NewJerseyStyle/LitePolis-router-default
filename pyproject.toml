@@ -8,9 +8,9 @@ build-backend = "setuptools.build_meta"
 name = "litepolis-router-default"
 version = "0.0.1"
 authors = [
-    { name = "Your name" },
+    { name = "NewJerseyStyle" },
 ]
-description = "The template module for LitePolis"
+description = "The default router module for LitePolis that compatible with CvicTechTO/Polis"
 dependencies = [
     "fastapi",
     "litepolis",
@@ -28,7 +28,7 @@ file = "README.md"
 content-type = "text/markdown"
 
 [project.urls]
-Homepage = "https://github.com/change-to-your-repo"
+Homepage = "https://github.com/NewJerseyStyle/LitePolis-router-default"
 
 [tool.setuptools]
 include-package-data = false

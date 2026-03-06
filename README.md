@@ -1,300 +1,110 @@
 # LitePolis Router Default
 
-A Polis-compatible API implementation for LitePolis. This module provides the core API endpoints required by the Polis frontend (client-admin, client-participation, client-report).
+A drop-in backend for the [Polis](https://github.com/CivicTechTo/polis) frontend, built on the [LitePolis](https://github.com/NewJerseyStyle/LitePolis) infrastructure.
 
-## Overview
+If you're running a Polis instance (the civic engagement platform with opinion clustering) and want a lightweight, modular backend, this package provides the full `/api/v3/*` API surface that Polis clients expect — including `client-admin`, `client-participation`, and `client-report`.
 
-This router implements the `/api/v3/*` endpoints that the original Polis system uses, making LitePolis a drop-in replacement backend for Polis frontends.
+## What This Is
 
-## Implemented Endpoints
+`litepolis-router-default` is the default API router package for LitePolis. It handles authentication, conversations, participants, comments, votes, and invites — everything the Polis frontend needs to function. It plugs into the LitePolis system and is managed via `litepolis-cli`.
 
-### Authentication (`/api/v3/auth/*`)
-
-| Endpoint | Method | Description | Status |
-|----------|--------|-------------|--------|
-| `/auth/new` | POST | Register new user | ✅ |
-| `/auth/login` | POST | User login | ✅ |
-| `/auth/deregister` | POST | User logout | ✅ |
-| `/auth/pwresettoken` | POST | Request password reset token | ✅ |
-| `/auth/password` | POST | Reset password | ✅ |
-
-### Users (`/api/v3/users`)
-
-| Endpoint | Method | Description | Status |
-|----------|--------|-------------|--------|
-| `/users` | GET | Get current user info | ✅ |
-| `/users` | PUT | Update user info | ✅ |
-
-### Conversations (`/api/v3/conversations/*`)
-
-| Endpoint | Method | Description | Status |
-|----------|--------|-------------|--------|
-| `/conversations` | GET | List conversations | ✅ |
-| `/conversations` | POST | Create conversation | ✅ |
-| `/conversations` | PUT | Update conversation | ✅ |
-| `/conversation/close` | POST | Close conversation | ✅ |
-| `/conversation/reopen` | POST | Reopen conversation | ✅ |
-| `/conversations/preload` | GET | Preload conversation data | ✅ |
-| `/conversationStats` | GET | Get conversation statistics | ✅ |
-
-### Participants (`/api/v3/participants/*`)
-
-| Endpoint | Method | Description | Status |
-|----------|--------|-------------|--------|
-| `/participants` | GET | Get participants list | ✅ |
-| `/participants` | POST | Join conversation (create participant) | ✅ |
-| `/participationInit` | GET | Initialize participation session | ✅ |
-
-### Comments (`/api/v3/comments/*`)
-
-| Endpoint | Method | Description | Status |
-|----------|--------|-------------|--------|
-| `/comments` | GET | Get comments list | ✅ |
-| `/comments` | POST | Create new comment | ✅ |
-| `/comments` | PUT | Update comment (moderation) | ✅ |
-| `/nextComment` | GET | Get next comment for voting | ✅ |
-
-### Votes (`/api/v3/votes/*`)
-
-| Endpoint | Method | Description | Status |
-|----------|--------|-------------|--------|
-| `/votes` | GET | Get votes data | ✅ |
-| `/votes` | POST | Submit vote | ✅ |
-| `/votes/me` | GET | Get current user's votes | ✅ |
-
-### Invites (`/api/v3/zinvites/*`, `/api/v3/joinWithInvite`)
-
-| Endpoint | Method | Description | Status |
-|----------|--------|-------------|--------|
-| `/zinvites/{zid}` | GET | Get conversation invite code | ✅ |
-| `/zinvites/{zid}` | POST | Create invite code | ✅ |
-| `/joinWithInvite` | POST | Join conversation with invite | ✅ |
-
-### Math/Visualization (`/api/v3/math/*`)
-
-| Endpoint | Method | Description | Status |
-|----------|--------|-------------|--------|
-| `/math/pca` | GET | Get PCA visualization data | ⚠️ Stub |
-| `/math/pca2` | GET | Get PCA data (v2) | ⚠️ Stub |
-
-### System (`/api/v3/*`)
-
-| Endpoint | Method | Description | Status |
-|----------|--------|-------------|--------|
-| `/testConnection` | GET | Health check | ✅ |
-| `/testDatabase` | GET | Database connection test | ✅ |
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    LitePolis Architecture                    │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│  run_server.py                 Entry point (FastAPI app)    │
-│       │                                                     │
-│       └── imports router from litepolis_router_default      │
-│                                                             │
-├─────────────────────────────────────────────────────────────┤
-│  litepolis_router_default/                                  │
-│  └── core.py                   All API endpoints            │
-│       ├── Authentication (JWT, cookies)                     │
-│       ├── User management                                   │
-│       ├── Conversation CRUD                                 │
-│       ├── Participant management                            │
-│       ├── Comment system                                    │
-│       └── Voting system                                     │
-│                                                             │
-├─────────────────────────────────────────────────────────────┤
-│  litepolis-database-default/    Database layer (SQLite)     │
-│       ├── User model                                        │
-│       ├── Conversation model                                │
-│       ├── Participant model                                 │
-│       ├── Comment model                                     │
-│       ├── Vote model                                        │
-│       └── Zinvite model                                     │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
-```
-
-## Quick Start
-
-### Prerequisites
+## Prerequisites
 
 - Python 3.10+
-- pip or uv
+- [LitePolis](https://github.com/NewJerseyStyle/LitePolis) installed (`pip install litepolis`)
 
-### Installation
+## Deploy with LitePolis
 
-```bash
-# Install the package
-pip install -e .
+The recommended way to use this package is through `litepolis-cli`, which manages all router and database packages for you.
 
-# Or with uv
-uv pip install -e .
-```
-
-### Running the Server
+**1. Install the LitePolis CLI**
 
 ```bash
-# Set port (default: 8000)
-export LITEPOLIS_PORT=8888
-
-# Start server
-python run_server.py
-
-# Server will be available at:
-# http://localhost:8888/api/v3/
+pip install litepolis
 ```
 
-### Testing the API
+**2. Confirm this router is in your deployment**
+
+`litepolis-router-default` is included by default. You can verify:
 
 ```bash
-# Run unit tests
-pytest tests/ -v
-
-# Run E2E API tests (requires server running)
-LITEPOLIS_BASE_URL=http://localhost:8888/api/v3 python ../test_e2e_api.py
+litepolis-cli deploy list-deps
 ```
 
-## Authentication
+If it's not listed, add it:
 
-The router supports multiple authentication methods:
-
-1. **Cookie-based**: `token2` and `uid2` cookies set on login
-2. **JWT Bearer**: `Authorization: Bearer <token>` header
-3. **XID**: External ID for embedded scenarios
-
-### Example: Login and Create Conversation
-
-```python
-import requests
-
-# Login
-resp = requests.post('http://localhost:8888/api/v3/auth/login', json={
-    'email': 'user@example.com',
-    'password': 'password123'
-})
-token = resp.json()['token']
-
-# Create conversation (using cookie)
-resp = requests.post('http://localhost:8888/api/v3/conversations', 
-    json={'topic': 'My Conversation', 'description': 'Description'},
-    cookies={'token2': token}
-)
-conversation_id = resp.json()['conversation_id']
-
-# Initialize participation
-resp = requests.get('http://localhost:8888/api/v3/participationInit',
-    params={'conversation_id': conversation_id},
-    cookies={'token2': token}
-)
+```bash
+litepolis-cli deploy add-deps litepolis-router-default
 ```
 
-## API Response Format
+**3. Initialize configuration**
 
-### Success Response
-
-```json
-{
-    "status": "ok",
-    "data": { ... }
-}
+```bash
+litepolis-cli deploy init-config
 ```
 
-### Error Response
+Edit the generated config file to set your secret key and other settings:
 
-```json
-{
-    "status": "error",
-    "error": "polis_err_xxx",
-    "message": "Error description"
-}
+```bash
+nano ~/.litepolis/config.conf
 ```
 
-### Auth Response (Polis-compatible)
+**4. Start the server**
 
-```json
-{
-    "status": "ok",
-    "success": true,
-    "token": "jwt_token_here",
-    "user_id": 1,
-    "data": {"uid": 1, "email": "user@example.com"}
-}
+```bash
+litepolis-cli deploy serve
 ```
 
-## Key Concepts
+Your Polis-compatible API will be available at `http://localhost:8000/api/v3/`.
 
-### conversation_id vs zid
-
-- `zid`: Internal numeric ID (database primary key)
-- `conversation_id`: External string ID (zinvite code, e.g., "3YUM7S49pdMe")
-- API uses `conversation_id` externally, converts to `zid` internally
-
-### Participant (pid)
-
-- `pid` is a unique identifier for a user's participation in a conversation
-- Created automatically when user first accesses a conversation
-- Stored in JWT for subsequent requests
-
-### Vote Values
-
-- `-1`: Disagree
-- `0`: Pass / Skip
-- `1`: Agree
-
-### Moderation Status (mod)
-
-- `0`: Pending review
-- `1`: Approved
-- `-1`: Rejected
+You can now point any Polis frontend (e.g. the CivicTechTo/polis clients) at this URL as the backend.
 
 ## Configuration
 
-The router uses `DEFAULT_CONFIG` for default settings:
+Key settings in `~/.litepolis/config.conf`:
 
-```python
-DEFAULT_CONFIG = {
-    "jwt_secret": "dev-secret-key",
-    "jwt_expire_hours": 168,
-    # Add more config as needed
-}
+| Setting | Default | Description |
+|---|---|---|
+| `jwt_secret` | `dev-secret-key` | **Change this in production** |
+| `jwt_expire_hours` | `168` | Token lifetime (7 days) |
+| `LITEPOLIS_PORT` | `8000` | Port to serve on |
+
+## Connecting a Polis Frontend
+
+Once your LitePolis server is running, configure the Polis frontend to point to your server's address. In the CivicTechTo/polis repo, this is typically the `API_URL` environment variable in the client configuration.
+
+The API base path is:
+```
+http://<your-server>:<port>/api/v3
 ```
 
-## Testing
+## Supported Polis API Endpoints
 
-### Unit Tests
+This router implements the full Polis v3 API:
 
-```bash
-# Run all tests
-pytest tests/ -v
+- **Auth** — register, login, logout, password reset
+- **Users** — profile read/update
+- **Conversations** — create, list, update, open/close
+- **Participants** — join conversations, session init
+- **Comments** — submit, moderate, get next for voting
+- **Votes** — agree / disagree / pass
+- **Invites** — create and join via invite code
 
-# Run specific test file
-pytest tests/test_auth.py -v
-
-# Run with coverage
-pytest tests/ --cov=litepolis_router_default
-```
+> **Note:** Math/visualization endpoints (`/math/pca`, `/math/pca2`) currently return stub data. Full clustering output requires a separate math service.
 
 ## Known Limitations
 
-1. **Math endpoints** (`/math/pca`, `/math/pca2`) are stubs - return placeholder data
-2. **Email notifications** not implemented
-3. **OIDC/Social login** not yet implemented
+- Math/PCA visualization is not yet computed (stub endpoints)
+- Email notifications are not implemented
+- Social/OIDC login is not yet supported
 
-## Contributing
+## Related
 
-1. Follow existing code patterns
-2. Add tests for new endpoints
-3. Update this README for API changes
-4. Ensure E2E tests pass before submitting
+- [LitePolis](https://github.com/NewJerseyStyle/LitePolis) — the core platform
+- [LitePolis Database Default](https://github.com/NewJerseyStyle/LitePolis-database-default) — the default database layer
+- [Polis (CivicTechTo)](https://github.com/CivicTechTo/polis) — the frontend this router is compatible with
+- [Awesome LitePolis](https://newjerseystyle.github.io/Awesome-LitePolis/) — browse available LitePolis packages
 
 ## License
 
-See LICENSE file.
-
-## Related Projects
-
-- [litepolis-database-default](https://github.com/NewJerseyStyle/LitePolis-database-default) - Database layer
-- [Polis](https://github.com/compdemocracy/polis) - Original Polis system
+See [LICENSE](./LICENSE).

@@ -6,7 +6,7 @@ This module implements the Polis API v3 endpoints for the LitePolis system.
 
 from typing import Optional, List, Dict, Any, Union
 from pydantic import BaseModel, EmailStr, Field, field_validator
-from fastapi import APIRouter, HTTPException, Depends, Header, Query, Cookie, Response, Body
+from fastapi import APIRouter, HTTPException, Depends, Header, Query, Cookie, Response, Body, Request
 from fastapi.security import HTTPBearer
 from datetime import datetime, timedelta
 import hashlib
@@ -56,7 +56,7 @@ class AuthNewRequest(BaseModel):
     password: str
     name: Optional[str] = None
     hname: Optional[str] = None  # Alias for name (Polis compatibility)
-    gatekeeperTosPrivacy: Optional[str] = None  # Polis sends this
+    gatekeeperTosPrivacy: Optional[Union[str, bool]] = None  # Polis sends this as boolean or string
 
 
 class AuthLoginRequest(BaseModel):
@@ -106,8 +106,14 @@ class ConversationUpdateRequest(BaseModel):
     vis_type: Optional[int] = None
     help_type: Optional[int] = None
     write_type: Optional[int] = None
+    subscribe_type: Optional[int] = None
     bgcolor: Optional[str] = None
     help_color: Optional[str] = None
+    auth_opt_fb: Optional[bool] = None
+    auth_opt_tw: Optional[bool] = None
+    auth_needed_to_write: Optional[bool] = None
+    auth_needed_to_vote: Optional[bool] = None
+    auth_opt_allow_3rdparty: Optional[bool] = None
 
 
 class ConversationCreateRequest(BaseModel):
@@ -276,7 +282,7 @@ async def register_user(request: AuthNewRequest, response: Response):
 
     existing = DatabaseActor.read_user_by_email(request.email)
     if existing:
-        raise HTTPException(status_code=409, detail="Email already registered")
+        raise HTTPException(status_code=403, detail="Email address already in use")
 
     # Get name from either name or hname field
     user_name = request.name or request.hname
@@ -286,6 +292,7 @@ async def register_user(request: AuthNewRequest, response: Response):
     user = DatabaseActor.create_user({
         "email": request.email,
         "auth_token": password_hash,
+        "hname": user_name,
     })
 
     token = create_token(user.id, user.email)
@@ -384,28 +391,86 @@ async def deregister(
 
 @router.post("/auth/pwresettoken", response_model=PolisResponse)
 async def request_password_reset(request: PasswordResetRequest):
-    """Request password reset token."""
-    # For MVP, just return success (in production, would send email)
+    """Request password reset token. Sends email with reset link."""
+    from .email_utils import send_password_reset_email
+    import os
+    
+    # Always send email (even for non-existing users) to avoid revealing user existence
+    # This matches the original Polis behavior
+    
+    user = DatabaseActor.read_user_by_email(request.email)
+    if user:
+        # Create reset token for existing user
+        reset_token = DatabaseActor.create_token(request.email)
+        
+        # Build reset URL
+        base_url = os.getenv("BASE_URL", "http://localhost:8080")
+        reset_url = f"{base_url}/pwreset/{reset_token.token}"
+        
+        # Send email with reset link
+        send_password_reset_email(request.email, reset_url)
+    else:
+        # Send a "no account found" email for non-existing users
+        # (This is what Polis does for test compatibility)
+        subject = "Password reset request"
+        body = f"""Someone requested to reset your password for {request.email}.
+
+No account was found with this email address. If you did not request this reset, you can ignore this email.
+"""
+        from .email_utils import send_email
+        send_email(request.email, subject, body)
+    
     return PolisResponse(status="ok", data={"sent": True})
 
 
 @router.post("/auth/password", response_model=PolisResponse)
-async def change_password(
-    request: PasswordChangeRequest,
-    user: Dict = Depends(require_auth)
+async def change_or_reset_password(
+    pwresettoken: Optional[str] = Body(None),
+    newPassword: Optional[str] = Body(None),
+    current_password: Optional[str] = Body(None),
+    new_password: Optional[str] = Body(None),
+    user: Dict = Depends(optional_auth)
 ):
-    """Change password."""
-    user_obj = DatabaseActor.read_user(user["uid"])
-    if not user_obj:
-        raise HTTPException(status_code=404, detail="User not found")
+    """Change password or reset with token.
+    
+    Two modes:
+    1. Reset with token: pwresettoken + newPassword (no auth required)
+    2. Change password: current_password + new_password (auth required)
+    """
+    # Mode 1: Password reset with token
+    if pwresettoken and newPassword:
+        token_obj = DatabaseActor.get_valid_token(pwresettoken)
+        if not token_obj:
+            raise HTTPException(status_code=400, detail="Invalid or expired reset token")
+        
+        user_obj = DatabaseActor.read_user_by_email(token_obj.email)
+        if not user_obj:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        new_hash = hashlib.sha256(newPassword.encode()).hexdigest()
+        DatabaseActor.update_user(user_obj.id, {"auth_token": new_hash})
+        DatabaseActor.mark_used(token_obj.id)
+        
+        return PolisResponse(status="ok", data={"changed": True})
+    
+    # Mode 2: Change password (requires auth and current password)
+    if current_password and new_password:
+        if not user:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        
+        user_obj = DatabaseActor.read_user(user["uid"])
+        if not user_obj:
+            raise HTTPException(status_code=404, detail="User not found")
 
-    current_hash = hashlib.sha256(request.current_password.encode()).hexdigest()
-    if user_obj.auth_token != current_hash:
-        raise HTTPException(status_code=401, detail="Invalid current password")
+        current_hash = hashlib.sha256(current_password.encode()).hexdigest()
+        if user_obj.auth_token != current_hash:
+            raise HTTPException(status_code=401, detail="Invalid current password")
 
-    new_hash = hashlib.sha256(request.new_password.encode()).hexdigest()
-    DatabaseActor.update_user(user["uid"], {"auth_token": new_hash})
-    return PolisResponse(status="ok", data={"changed": True})
+        new_hash = hashlib.sha256(new_password.encode()).hexdigest()
+        DatabaseActor.update_user(user["uid"], {"auth_token": new_hash})
+        return PolisResponse(status="ok", data={"changed": True})
+    
+    raise HTTPException(status_code=400, detail="Missing required parameters")
 
 
 # =====================
@@ -424,7 +489,7 @@ async def get_user(user: Dict = Depends(require_auth)):
     return {
         "uid": user_obj.id,
         "email": user_obj.email,
-        "hname": getattr(user_obj, "hname", None),  # human name
+        "hname": user_obj.hname,  # human name
         "created": user_obj.created.isoformat() if user_obj.created else None
     }
 
@@ -477,9 +542,12 @@ async def get_conversations(
         comment_count = DatabaseActor.count_comments_in_conversation(zid)
 
         # Determine if current user is owner/moderator
-        is_owner = user and user["uid"] == conv.user_id
+        is_owner = user is not None and user["uid"] == conv.user_id
         
-        return [{
+        # Get settings with defaults
+        settings = conv.settings or {}
+        
+        return {
             "conversation_id": conversation_id,
             "topic": conv.title,
             "description": conv.description,
@@ -489,8 +557,24 @@ async def get_conversations(
             "is_mod": is_owner,  # For now, owner is also moderator
             "created": conv.created.isoformat() if conv.created else None,
             "participant_count": participant_count,
-            "comment_count": comment_count
-        }]
+            "comment_count": comment_count,
+            # Admin UI fields with defaults matching Polis
+            "vis_type": settings.get("vis_type", 0),
+            "write_type": settings.get("write_type", 1),
+            "help_type": settings.get("help_type", 1),
+            "subscribe_type": settings.get("subscribe_type", 1),
+            "auth_opt_fb": settings.get("auth_opt_fb", True),
+            "auth_opt_tw": settings.get("auth_opt_tw", True),
+            "strict_moderation": settings.get("strict_moderation", False),
+            "auth_needed_to_write": settings.get("auth_needed_to_write", True),
+            "auth_needed_to_vote": settings.get("auth_needed_to_vote", False),
+            "auth_opt_allow_3rdparty": settings.get("auth_opt_allow_3rdparty", True),
+            "is_draft": settings.get("is_draft", True),
+            "is_anon": settings.get("is_anon", False),
+            "is_data_open": settings.get("is_data_open", False),
+            "profanity_filter": settings.get("profanity_filter", True),
+            "spam_filter": settings.get("spam_filter", True),
+        }
 
     # List all conversations
     conversations = DatabaseActor.list_conversations(page=1, page_size=100)
@@ -505,19 +589,37 @@ async def get_conversations(
         participant_count = DatabaseActor.count_participants(conv.id)
         
         # Determine if current user is owner/moderator
-        is_owner = user and user["uid"] == conv.user_id
+        is_owner = user is not None and user["uid"] == conv.user_id
+        
+        # Get settings with defaults
+        settings = conv.settings or {}
 
         result.append({
             "conversation_id": zinvite_obj.zinvite,
             "topic": conv.title,
             "description": conv.description,
             "is_active": not conv.is_archived,
-            "is_draft": conv.settings.get("is_draft", False) if conv.settings else False,
+            "is_draft": settings.get("is_draft", True),
             "owner": conv.user_id,
             "is_owner": is_owner,
             "is_mod": is_owner,  # For now, owner is also moderator
             "created": conv.created.isoformat() if conv.created else None,
-            "participant_count": participant_count
+            "participant_count": participant_count,
+            # Admin UI fields with defaults matching Polis
+            "vis_type": settings.get("vis_type", 0),
+            "write_type": settings.get("write_type", 1),
+            "help_type": settings.get("help_type", 1),
+            "subscribe_type": settings.get("subscribe_type", 1),
+            "auth_opt_fb": settings.get("auth_opt_fb", True),
+            "auth_opt_tw": settings.get("auth_opt_tw", True),
+            "strict_moderation": settings.get("strict_moderation", False),
+            "auth_needed_to_write": settings.get("auth_needed_to_write", True),
+            "auth_needed_to_vote": settings.get("auth_needed_to_vote", False),
+            "auth_opt_allow_3rdparty": settings.get("auth_opt_allow_3rdparty", True),
+            "is_anon": settings.get("is_anon", False),
+            "is_data_open": settings.get("is_data_open", False),
+            "profanity_filter": settings.get("profanity_filter", True),
+            "spam_filter": settings.get("spam_filter", True),
         })
 
     return result
@@ -529,17 +631,31 @@ async def create_conversation(
     user: Dict = Depends(require_auth)
 ):
     """Create a new conversation - returns conversation_id at top level for Polis compatibility."""
+    # Default settings matching Polis defaults
     settings = {
-        "is_draft": request.is_draft,
-        "is_anon": request.is_anon,
-        "is_data_open": request.is_data_open
+        "is_draft": request.is_draft if request.is_draft is not None else True,
+        "is_anon": request.is_anon if request.is_anon is not None else False,
+        "is_data_open": request.is_data_open if request.is_data_open is not None else False,
+        # Admin UI defaults
+        "vis_type": 0,  # Visualization off by default
+        "write_type": 1,  # Comment form on by default
+        "help_type": 1,  # Help text on by default
+        "subscribe_type": 1,  # Subscribe prompt on by default
+        "auth_opt_fb": True,  # Facebook login on by default
+        "auth_opt_tw": True,  # Twitter login on by default
+        "strict_moderation": False,  # Strict moderation off by default
+        "auth_needed_to_write": True,  # Require social auth to write by default (matches Polis)
+        "auth_needed_to_vote": False,  # Don't require auth to vote by default
+        "auth_opt_allow_3rdparty": True,
+        "profanity_filter": True,
+        "spam_filter": True,
     }
 
     conv = DatabaseActor.create_conversation({
-        "title": request.topic or "Untitled Conversation",
+        "title": request.topic or "",  # Empty string default, not "Untitled Conversation"
         "description": request.description,
         "user_id": user["uid"],
-        "is_archived": not request.is_active,
+        "is_archived": not request.is_active if request.is_active is not None else False,
         "settings": settings
     })
 
@@ -553,19 +669,42 @@ async def create_conversation(
         "topic": conv.title,
         "description": conv.description,
         "is_active": not conv.is_archived,
-        "is_draft": request.is_draft,
+        "is_draft": settings["is_draft"],
         "owner": conv.user_id,
-        "created": conv.created.isoformat() if conv.created else None
+        "created": conv.created.isoformat() if conv.created else None,
+        # Include all admin UI fields
+        "vis_type": settings["vis_type"],
+        "write_type": settings["write_type"],
+        "help_type": settings["help_type"],
+        "subscribe_type": settings["subscribe_type"],
+        "auth_opt_fb": settings["auth_opt_fb"],
+        "auth_opt_tw": settings["auth_opt_tw"],
+        "strict_moderation": settings["strict_moderation"],
+        "auth_needed_to_write": settings["auth_needed_to_write"],
+        "auth_needed_to_vote": settings["auth_needed_to_vote"],
     }
 
 
-@router.put("/conversations", response_model=PolisResponse)
+@router.put("/conversations")
 async def update_conversation(
-    request: ConversationUpdateRequest,
+    request: Request,
     user: Dict = Depends(require_auth)
 ):
-    """Update a conversation."""
-    zid = DatabaseActor.get_zid_by_zinvite(request.conversation_id)
+    """Update a conversation. Accepts params from JSON or form data for Polis compatibility."""
+    content_type = request.headers.get("content-type", "")
+    
+    # Parse request body based on content type
+    if "application/json" in content_type:
+        body = await request.json()
+    else:
+        # Form data
+        body = await request.form()
+    
+    conversation_id = body.get("conversation_id")
+    if not conversation_id:
+        raise HTTPException(status_code=400, detail="conversation_id required")
+    
+    zid = DatabaseActor.get_zid_by_zinvite(conversation_id)
     if not zid:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
@@ -577,28 +716,91 @@ async def update_conversation(
     if conv.user_id != user["uid"] and not user.get("is_admin"):
         raise HTTPException(status_code=403, detail="Not authorized")
 
+    # Helper to get values
+    def get_value(key, default=None, as_bool=False, as_int=False):
+        val = body.get(key)
+        if val is None:
+            return default
+        if as_bool:
+            if isinstance(val, bool):
+                return val
+            return str(val).lower() in ("true", "1", "yes")
+        if as_int:
+            return int(val) if val else default
+        return val
+
+    # Update basic fields
     update_data = {}
-    if request.topic is not None:
-        update_data["title"] = request.topic
-    if request.description is not None:
-        update_data["description"] = request.description
-    if request.is_active is not None:
-        update_data["is_archived"] = not request.is_active
+    topic = get_value("topic")
+    if topic is not None:
+        update_data["title"] = topic
+    description = get_value("description")
+    if description is not None:
+        update_data["description"] = description
+    is_active = get_value("is_active", as_bool=True)
+    if is_active is not None:
+        update_data["is_archived"] = not is_active
+
+    # Update settings - merge with existing settings
+    settings = conv.settings or {}
+    settings_updates = [
+        ("is_anon", get_value("is_anon", as_bool=True)),
+        ("is_draft", get_value("is_draft", as_bool=True)),
+        ("is_data_open", get_value("is_data_open", as_bool=True)),
+        ("owner_sees_participation_stats", get_value("owner_sees_participation_stats", as_bool=True)),
+        ("profanity_filter", get_value("profanity_filter", as_bool=True)),
+        ("spam_filter", get_value("spam_filter", as_bool=True)),
+        ("strict_moderation", get_value("strict_moderation", as_bool=True)),
+        ("vis_type", get_value("vis_type", as_int=True)),
+        ("help_type", get_value("help_type", as_int=True)),
+        ("write_type", get_value("write_type", as_int=True)),
+        ("subscribe_type", get_value("subscribe_type", as_int=True)),
+        ("bgcolor", get_value("bgcolor")),
+        ("help_color", get_value("help_color")),
+        ("auth_opt_fb", get_value("auth_opt_fb", as_bool=True)),
+        ("auth_opt_tw", get_value("auth_opt_tw", as_bool=True)),
+        ("auth_needed_to_write", get_value("auth_needed_to_write", as_bool=True)),
+        ("auth_needed_to_vote", get_value("auth_needed_to_vote", as_bool=True)),
+        ("auth_opt_allow_3rdparty", get_value("auth_opt_allow_3rdparty", as_bool=True)),
+    ]
+    
+    for field, value in settings_updates:
+        if value is not None:
+            settings[field] = value
+    
+    update_data["settings"] = settings
 
     if update_data:
         updated = DatabaseActor.update_conversation(zid, update_data)
     else:
         updated = conv
 
-    return PolisResponse(
-        status="ok",
-        data={
-            "conversation_id": request.conversation_id,
-            "topic": updated.title,
-            "description": updated.description,
-            "is_active": not updated.is_archived
-        }
-    )
+    # Get updated settings with defaults
+    final_settings = updated.settings or {}
+    
+    # Return fields at top level (matching original Polis API)
+    return {
+        "conversation_id": conversation_id,
+        "topic": updated.title,
+        "description": updated.description,
+        "is_active": not updated.is_archived,
+        "is_anon": final_settings.get("is_anon", False),
+        "is_draft": final_settings.get("is_draft", False),
+        "is_data_open": final_settings.get("is_data_open", False),
+        "vis_type": final_settings.get("vis_type", 0),
+        "write_type": final_settings.get("write_type", 1),
+        "help_type": final_settings.get("help_type", 1),
+        "subscribe_type": final_settings.get("subscribe_type", 1),
+        "auth_opt_fb": final_settings.get("auth_opt_fb", True),
+        "auth_opt_tw": final_settings.get("auth_opt_tw", True),
+        "strict_moderation": final_settings.get("strict_moderation", False),
+        "auth_needed_to_write": final_settings.get("auth_needed_to_write", True),
+        "auth_needed_to_vote": final_settings.get("auth_needed_to_vote", False),
+        "auth_opt_allow_3rdparty": final_settings.get("auth_opt_allow_3rdparty", True),
+        "profanity_filter": final_settings.get("profanity_filter", True),
+        "spam_filter": final_settings.get("spam_filter", True),
+        "owner_sees_participation_stats": final_settings.get("owner_sees_participation_stats", False),
+    }
 
 
 @router.post("/conversation/close", response_model=PolisResponse)
@@ -702,9 +904,10 @@ async def participation_init(
     Returns data in the original Polis format (not wrapped in status/data).
     """
     # If no conversation_id, return minimal response for page init
+    # Note: Return {} for user instead of None to avoid frontend promise hanging
     if not conversation_id:
         result = {
-            "user": {"uid": user["uid"]} if user else None,
+            "user": {"uid": user["uid"]} if user else {},
             "ptpt": None,
             "nextComment": None,
             "conversation": {"translations": []},  # Must have translations field
@@ -723,21 +926,71 @@ async def participation_init(
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    # Build conversation object with translations field
+    # Get settings from conversation
+    settings = conv.settings or {}
+    
+    # Get owner info
+    owner_user = DatabaseActor.read_user(conv.user_id) if conv.user_id else None
+    ownername = getattr(owner_user, 'hname', None) or (owner_user.email if owner_user else None)
+    
+    # Compute auth options
+    auth_opt_allow_3rdparty = settings.get("auth_opt_allow_3rdparty", True)
+    auth_opt_fb = settings.get("auth_opt_fb", True)
+    auth_opt_tw = settings.get("auth_opt_tw", True)
+    auth_opt_fb_computed = auth_opt_allow_3rdparty and auth_opt_fb
+    auth_opt_tw_computed = auth_opt_allow_3rdparty and auth_opt_tw
+    
+    # Determine if current user is owner
+    is_owner = user and user.get("uid") == conv.user_id
+
+    # Build conversation object with all required fields
     conversation = {
         "conversation_id": conversation_id,
         "topic": conv.title,
         "description": conv.description or "",
         "is_active": not conv.is_archived,
         "is_archived": conv.is_archived,
+        "is_draft": settings.get("is_draft", False),
+        "is_anon": settings.get("is_anon", False),
         "participant_count": DatabaseActor.count_participants(zid),
         "comment_count": DatabaseActor.count_comments_in_conversation(zid),
         "translations": [],  # Required field for frontend
         "created": conv.created.isoformat() if hasattr(conv, 'created') and conv.created else None,
+        "owner": conv.user_id,
+        "ownername": ownername,
+        "is_owner": is_owner,
+        "is_mod": is_owner,  # For now, owner is also mod
+        # Auth settings
+        "auth_opt_allow_3rdparty": auth_opt_allow_3rdparty,
+        "auth_opt_fb": auth_opt_fb,
+        "auth_opt_tw": auth_opt_tw,
+        "auth_opt_fb_computed": auth_opt_fb_computed,
+        "auth_opt_tw_computed": auth_opt_tw_computed,
+        "auth_needed_to_write": settings.get("auth_needed_to_write", True),
+        "auth_needed_to_vote": settings.get("auth_needed_to_vote", False),
+        # UI settings
+        "vis_type": settings.get("vis_type", 0),
+        "write_type": settings.get("write_type", 1),
+        "help_type": settings.get("help_type", 1),
+        "socialbtn_type": settings.get("socialbtn_type", 1),
+        "subscribe_type": settings.get("subscribe_type", 1),
+        # Moderation settings
+        "strict_moderation": settings.get("strict_moderation", False),
+        "profanity_filter": settings.get("profanity_filter", True),
+        "spam_filter": settings.get("spam_filter", True),
+        # Other settings
+        "bgcolor": settings.get("bgcolor"),
+        "help_color": settings.get("help_color"),
+        "help_bgcolor": settings.get("help_bgcolor"),
+        "context": settings.get("context"),
+        "link_url": settings.get("link_url"),
     }
 
     # Build user object
-    user_data = None
+    # Note: Return empty object {} for anonymous users instead of None
+    # because the frontend's preloadHelper checks for truthy value
+    # and will hang if it receives null
+    user_data = {}
     ptpt_data = None
     votes_data = []
     
@@ -810,37 +1063,55 @@ async def participation_init(
 # Comments Endpoints (P0)
 # =====================
 
-@router.get("/comments", response_model=PolisResponse)
+@router.get("/comments")
 async def get_comments(
     conversation_id: str,
     mod: Optional[int] = None,
+    moderation: Optional[bool] = None,
+    include_voting_patterns: Optional[bool] = None,
     user: Optional[Dict] = Depends(optional_auth)
 ):
-    """Get comments in a conversation."""
+    """Get comments in a conversation. Returns array directly for Polis compatibility."""
     zid = DatabaseActor.get_zid_by_zinvite(conversation_id)
     if not zid:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    comments = DatabaseActor.list_comments_by_conversation_id(zid, page=1, page_size=1000)
+    # Filter by moderation status if specified
+    all_comments = DatabaseActor.list_comments_by_conversation_id(zid, page=1, page_size=1000)
     result = []
 
-    for c in comments:
+    for c in all_comments:
+        # Filter by mod status if specified
+        if mod is not None and c.moderation_status != mod:
+            continue
+
         # Get participant for comment
         if user:
             participant = DatabaseActor.get_participant_by_zid_uid(zid, user["uid"])
         else:
             participant = None
 
-        result.append({
+        comment_data = {
             "tid": c.id,
             "txt": c.text_field,
             "pid": c.user_id,  # Simplified
             "created": c.created.isoformat() if c.created else None,
             "mod": c.moderation_status,
-            "is_seed": False
-        })
+            "is_seed": False,
+            "active": True,
+            "velocity": 1.0
+        }
 
-    return PolisResponse(status="ok", data=result)
+        # Add voting counts for moderation view
+        if moderation:
+            comment_data["agree_count"] = 0
+            comment_data["disagree_count"] = 0
+            comment_data["pass_count"] = 0
+            comment_data["count"] = 0
+
+        result.append(comment_data)
+
+    return result  # Return array directly for Polis compatibility
 
 
 @router.post("/comments", response_model=PolisResponse)
@@ -887,13 +1158,31 @@ async def create_comment(
     )
 
 
-@router.put("/comments", response_model=PolisResponse)
+@router.put("/comments")
 async def update_comment(
-    tid: int,
-    mod: Optional[int] = None,
+    request: Request,
     user: Dict = Depends(require_auth)
 ):
-    """Update a comment (moderation)."""
+    """Update a comment (moderation). Accepts params from body for Polis compatibility."""
+    # Get params from body (Polis sends them as form data)
+    form_data = await request.form()
+    
+    # Try to get tid from body or query params
+    tid = form_data.get("tid") if "tid" in form_data else None
+    if tid is None:
+        tid = request.query_params.get("tid")
+    if tid is None:
+        raise HTTPException(status_code=400, detail="tid required")
+    tid = int(tid)
+    
+    # Get other params from body
+    mod = form_data.get("mod")
+    if mod is not None:
+        mod = int(mod)
+    active = form_data.get("active")
+    if active is not None:
+        active = str(active).lower() in ("true", "1", "yes")
+    
     comment = DatabaseActor.read_comment(tid)
     if not comment:
         raise HTTPException(status_code=404, detail="Comment not found")
@@ -901,41 +1190,44 @@ async def update_comment(
     update_data = {}
     if mod is not None:
         update_data["moderation_status"] = mod
+    if active is not None:
+        update_data["active"] = active
 
     if update_data:
-        updated = DatabaseActor.update_comment(tid, update_data)
-        return PolisResponse(
-            status="ok",
-            data={
-                "tid": updated.id,
-                "mod": updated.moderation_status
-            }
-        )
+        DatabaseActor.update_comment(tid, update_data)
 
-    return PolisResponse(status="ok", data={"tid": tid})
+    return {}  # Return empty object for Polis compatibility
 
 
 @router.get("/nextComment", response_model=PolisResponse)
 async def get_next_comment(
     conversation_id: str,
-    user: Dict = Depends(require_auth)
+    not_voted_by_pid: Optional[str] = None,
+    limit: Optional[int] = 1,
+    include_social: Optional[bool] = True,
+    user: Optional[Dict] = Depends(optional_auth)
 ):
-    """Get next comment to vote on."""
+    """Get next comment to vote on. Supports both authenticated and anonymous users."""
     zid = DatabaseActor.get_zid_by_zinvite(conversation_id)
     if not zid:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    participant = DatabaseActor.get_participant_by_zid_uid(zid, user["uid"])
-    if not participant:
-        participant = DatabaseActor.create_participant({"zid": zid, "uid": user["uid"]})
-
     # Get all comments in conversation
     comments = DatabaseActor.list_comments_by_conversation_id(zid)
 
-    # Find comments user hasn't voted on
+    # Find comments the user hasn't voted on
     for c in comments:
-        existing_vote = DatabaseActor.get_vote_by_user_comment(user["uid"], c.id)
-        if not existing_vote and c.moderation_status >= 0:
+        # Skip rejected/pending comments (moderation_status >= 0 means approved)
+        if c.moderation_status < 0:
+            continue
+            
+        # Check if user has voted on this comment
+        has_voted = False
+        if user:
+            existing_vote = DatabaseActor.get_vote_by_user_comment(user["uid"], c.id)
+            has_voted = existing_vote is not None
+        
+        if not has_voted:
             return PolisResponse(
                 status="ok",
                 data={
@@ -1232,3 +1524,24 @@ async def preload_conversation(
             "is_active": not conv.is_archived
         }
     )
+
+
+# =====================
+# Domain Whitelist (P1)
+# =====================
+
+@router.get("/domainWhitelist")
+async def get_domain_whitelist(
+    user: Optional[Dict] = Depends(optional_auth)
+):
+    """Get domain whitelist - returns empty string (all domains allowed) for local testing."""
+    return {"domain_whitelist": ""}
+
+
+@router.post("/domainWhitelist")
+async def set_domain_whitelist(
+    domain_whitelist: str = Body("", embed=True),
+    user: Dict = Depends(require_auth)
+):
+    """Set domain whitelist - no-op for local testing."""
+    return {"domain_whitelist": domain_whitelist}

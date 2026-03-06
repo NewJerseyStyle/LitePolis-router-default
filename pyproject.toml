@@ -6,17 +6,19 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "litepolis-router-default"
-version = "0.0.1"
+version = "0.1.0"
 authors = [
-    { name = "Your name" },
+    { name = "NewJerseyStyle" },
+    { name = "GLM-5" },
 ]
-description = "The template module for LitePolis"
+description = "Polis-compatible API implementation for LitePolis"
 dependencies = [
     "fastapi",
     "litepolis",
     "pydantic>=2.0",
     "python-jose[cryptography]>=3.3.0",
     "passlib[bcrypt]>=1.7.4",
+    "python-multipart>=0.0.6",
     "litepolis-database-default",
 ]
 
@@ -28,7 +30,7 @@ file = "README.md"
 content-type = "text/markdown"
 
 [project.urls]
-Homepage = "https://github.com/change-to-your-repo"
+Homepage = "https://github.com/NewJerseyStyle/litepolis-router-default"
 
 [tool.setuptools]
 include-package-data = false

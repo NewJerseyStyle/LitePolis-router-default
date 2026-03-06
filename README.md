@@ -1,12 +1,12 @@
 # LitePolis Router Default
 
-A drop-in backend for the [Polis](https://github.com/CivicTechTo/polis) frontend, built on the [LitePolis](https://github.com/NewJerseyStyle/LitePolis) infrastructure.
+A drop-in backend for the [Polis 1.0](https://github.com/CivicTechTo/polis) frontend, built on the [LitePolis](https://github.com/NewJerseyStyle/LitePolis) infrastructure.
 
 If you're running a Polis instance (the civic engagement platform with opinion clustering) and want a lightweight, modular backend, this package provides the full `/api/v3/*` API surface that Polis clients expect — including `client-admin`, `client-participation`, and `client-report`.
 
 ## What This Is
 
-`litepolis-router-default` is the default API router package for LitePolis. It handles authentication, conversations, participants, comments, votes, and invites — everything the Polis frontend needs to function. It plugs into the LitePolis system and is managed via `litepolis-cli`.
+`litepolis-router-default` is an API router package for LitePolis. It handles authentication, conversations, participants, comments, votes, and invites — everything the Polis frontend needs to function.
 
 ## Prerequisites
 
@@ -17,6 +17,8 @@ If you're running a Polis instance (the civic engagement platform with opinion c
 
 The recommended way to use this package is through `litepolis-cli`, which manages all router and database packages for you.
 
+LitePolis uses a `packages.txt` file (like `requirements.txt`) to declare which packages your deployment needs. The default location is `~/.litepolis/packages.txt`. You can add into the `packages.txt` file instead of using `litepolis-cli deploy`.
+
 **1. Install the LitePolis CLI**
 
 ```bash
@@ -25,7 +27,7 @@ pip install litepolis
 
 **2. Confirm this router is in your deployment**
 
-`litepolis-router-default` is included by default. You can verify:
+`litepolis-router-default` is included by default if you install with `litepolis[default]`. You can verify:
 
 ```bash
 litepolis-cli deploy list-deps
